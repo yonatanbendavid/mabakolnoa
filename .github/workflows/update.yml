@@ -1,0 +1,56 @@
+# "מה בקולנוע": downloads every chain's schedule on GitHub's computers and updates the phone page.
+# Copied by update.ps1 into the GitHub repository as .github/workflows/update.yml.
+# Run it from the phone: GitHub app -> mabakolnoa -> Actions -> "Update the schedules" -> Run workflow.
+name: Update the schedules
+
+on:
+  workflow_dispatch: {}            # the "Run workflow" button
+  schedule:                        # times are UTC: Israel is UTC+2 in winter, UTC+3 in summer
+    - cron: "0 6 * * *"            # once a day, about 08:00
+  push:                            # also when the updater itself changes (not on ordinary page uploads)
+    branches: [main]
+    paths: ["update.ps1", ".github/workflows/update.yml"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-schedules
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Use Israel time
+        shell: powershell
+        run: tzutil /s "Israel Standard Time"
+
+      - name: Download the schedules
+        shell: powershell
+        run: .\update.ps1 -NoOpen
+
+      - name: Show which chains failed, if any
+        shell: powershell
+        run: |
+          $h = [IO.File]::ReadAllText("index.html")
+          [regex]::Match($h, 'window\.LEV_ERROR = .*?LEV_ERROR_AT').Value
+
+      - name: Cinematheque source this run
+        shell: powershell
+        continue-on-error: true
+        run: if (Test-Path cinematheque-error.txt) { Get-Content cinematheque-error.txt }
+
+      - name: Publish the page
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898699+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit --amend --no-edit --date=now -q
+          git push --force origin HEAD:main
